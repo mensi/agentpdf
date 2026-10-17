@@ -1,0 +1,10 @@
+{
+  "name": "agentpdf",
+  "version": "0.1.0",
+  "description": "Convert PDFs (specifications, manuals, datasheets) into searchable Markdown sections and look things up in them",
+  "author": {
+    "name": "Manuel Stocker"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/mensi/agentpdf"
+}

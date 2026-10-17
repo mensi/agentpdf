@@ -1,0 +1,56 @@
+[project]
+name = "agentpdf"
+version = "0.1.0"
+description = "Convert large PDF documents into small, searchable files for AI coding agents"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Manuel Stocker", email = "mensi@mensi.ch" }
+]
+requires-python = ">=3.12"
+keywords = ["pdf", "markdown", "ai", "agents", "llm", "documentation", "search"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Markup :: Markdown",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pdfplumber>=0.11",
+    "pypdf>=5",
+    "pypdfium2>=5",
+]
+
+[project.urls]
+Repository = "https://github.com/mensi/agentpdf"
+Issues = "https://github.com/mensi/agentpdf/issues"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+
+[project.scripts]
+agentpdf = "agentpdf.cli:main"
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# Typographic characters (dashes, bullets) are matched intentionally.
+ignore = ["RUF001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

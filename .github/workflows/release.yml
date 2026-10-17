@@ -1,0 +1,22 @@
+name: Release
+
+# Publishes to PyPI when a GitHub release is published. Uses PyPI trusted
+# publishing: configure the "pypi" environment and this workflow as a trusted
+# publisher for the project on pypi.org.
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run pytest
+      - run: uv build
+      - run: uv publish

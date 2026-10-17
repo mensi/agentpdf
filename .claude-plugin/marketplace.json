@@ -1,0 +1,13 @@
+{
+  "name": "agentpdf",
+  "owner": { "name": "mensi" },
+  "description": "Make large PDF documents searchable and readable for coding agents",
+  "plugins": [
+    {
+      "name": "agentpdf",
+      "version": "0.1.0",
+      "source": "./plugins/agentpdf",
+      "description": "Convert PDFs (specifications, manuals, datasheets) into searchable Markdown sections and look things up in them"
+    }
+  ]
+}
