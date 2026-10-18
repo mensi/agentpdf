@@ -39,7 +39,7 @@ def test_search_returns_location(out_root: Path) -> None:
     assert hit.page == 1
     assert hit.heading == "1 Timers"
     assert "[ATTACH] [REQUEST]" in hit.snippet
-    lines = (out_root / hit.file).read_text().splitlines()
+    lines = (out_root / hit.file).read_text(encoding="utf-8").splitlines()
     assert "T3310" in lines[hit.line - 1]
 
 
@@ -58,7 +58,7 @@ def test_search_relaxes_to_any_term(out_root: Path) -> None:
 def test_body_text_is_not_parsed_as_heading(out_root: Path) -> None:
     hits, _ = search(out_root, "congestion")
     assert hits[0].heading == "1 Timers"
-    text = (out_root / hits[0].file).read_text()
+    text = (out_root / hits[0].file).read_text(encoding="utf-8")
     assert "\n\\# 22 (Congestion)" in text
 
 

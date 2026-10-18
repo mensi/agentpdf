@@ -63,11 +63,13 @@ def spec_pdf(tmp_path: Path) -> Path:
 
 
 def _section_text(out_dir: Path) -> str:
-    return "\n".join(p.read_text() for p in sorted((out_dir / "sections").glob("*.md")))
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted((out_dir / "sections").glob("*.md")))
 
 
 def _file_with(out_dir: Path, needle: str) -> str:
-    matches = [text for p in (out_dir / "sections").glob("*.md") if needle in (text := p.read_text())]
+    matches = [
+        text for p in (out_dir / "sections").glob("*.md") if needle in (text := p.read_text(encoding="utf-8"))
+    ]
     assert len(matches) == 1, f"{needle!r} found in {len(matches)} files"
     return matches[0]
 
@@ -79,7 +81,7 @@ def test_convert_layout(spec_pdf: Path, tmp_path: Path) -> None:
     files = sorted(p.name for p in (out_dir / "sections").glob("*.md"))
     assert files == ["001-1-introduction.md", "002-2-limits.md", "003-3-figures.md"]
 
-    intro = (out_dir / "sections" / "001-1-introduction.md").read_text()
+    intro = (out_dir / "sections" / "001-1-introduction.md").read_text(encoding="utf-8")
     assert intro.startswith("<!-- page 1 -->\n\n# 1 Introduction\n")
     assert "\n## 1.1 Scope\n" in intro
     # Lines of a paragraph are joined so phrases spanning lines are searchable.
@@ -120,7 +122,7 @@ def test_reading_order_and_figure(spec_pdf: Path, tmp_path: Path) -> None:
 def test_manifest_and_index(spec_pdf: Path, tmp_path: Path) -> None:
     out_root = tmp_path / "out"
     out_dir = convert(str(spec_pdf), str(out_root), Options())
-    manifest = json.loads((out_dir / "manifest.json").read_text())
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["title"] == "Example Specification"
     assert manifest["source"]["pages"] == 3
     assert manifest["pages"][1]["flags"] == ["table"]
@@ -133,10 +135,10 @@ def test_manifest_and_index(spec_pdf: Path, tmp_path: Path) -> None:
         "file": "sections/001-1-introduction.md",
     }
 
-    index = (out_dir / "INDEX.md").read_text()
+    index = (out_dir / "INDEX.md").read_text(encoding="utf-8")
     assert "- [1 Introduction](sections/001-1-introduction.md) — p. 1, ~" in index
 
-    agents = (out_root / "AGENTS.md").read_text()
+    agents = (out_root / "AGENTS.md").read_text(encoding="utf-8")
     assert "[Example Specification](example-spec/INDEX.md)" in agents
 
 
@@ -158,7 +160,7 @@ def test_intended_line_breaks_are_kept(tmp_path: Path) -> None:
 def test_reconvert_replaces_output(spec_pdf: Path, tmp_path: Path) -> None:
     out_dir = convert(str(spec_pdf), str(tmp_path / "out"), Options())
     stale = out_dir / "sections" / "999-stale.md"
-    stale.write_text("old")
+    stale.write_text("old", encoding="utf-8")
     convert(str(spec_pdf), str(tmp_path / "out"), Options())
     assert not stale.exists()
 
@@ -166,10 +168,10 @@ def test_reconvert_replaces_output(spec_pdf: Path, tmp_path: Path) -> None:
 def test_refuses_to_overwrite_foreign_directory(spec_pdf: Path, tmp_path: Path) -> None:
     foreign = tmp_path / "out" / "example-spec"
     foreign.mkdir(parents=True)
-    (foreign / "notes.txt").write_text("keep me")
+    (foreign / "notes.txt").write_text("keep me", encoding="utf-8")
     with pytest.raises(FileExistsError):
         convert(str(spec_pdf), str(tmp_path / "out"), Options())
-    assert (foreign / "notes.txt").read_text() == "keep me"
+    assert (foreign / "notes.txt").read_text(encoding="utf-8") == "keep me"
 
 
 def test_outline_levels_repaired_from_numbering(tmp_path: Path) -> None:
@@ -184,7 +186,8 @@ def test_outline_levels_repaired_from_numbering(tmp_path: Path) -> None:
     for title in titles:
         parent = pdf.bookmark(title, 0, parent=parent)
     out_dir = convert(str(pdf.save(tmp_path / "drift.pdf")), str(tmp_path / "out"), Options())
-    levels = [h["level"] for h in json.loads((out_dir / "manifest.json").read_text())["outline"]]
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    levels = [h["level"] for h in manifest["outline"]]
     assert levels == [0, 1, 1, 0, 1]
 
 
@@ -199,7 +202,7 @@ def test_headings_from_typography_without_outline(tmp_path: Path) -> None:
         page.text(72, 170, f"{n}.1 Details", size=11, bold=True)
         page.text(72, 195, BODY)
     out_dir = convert(str(pdf.save(tmp_path / "plain.pdf")), str(tmp_path / "out"), Options())
-    manifest = json.loads((out_dir / "manifest.json").read_text())
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["outline_source"] == "typography"
     headings = [(h["title"], h["level"]) for h in manifest["outline"]]
     assert headings == [("1. Chapter 1", 0), ("1.1 Details", 1), ("2. Chapter 2", 0), ("2.1 Details", 1)]
@@ -251,15 +254,15 @@ def test_refuses_non_empty_unmanaged_out_root(spec_pdf: Path, tmp_path: Path) ->
     out_root = tmp_path / "out"
     out_root.mkdir()
     unrelated = out_root / "unrelated.txt"
-    unrelated.write_text("keep me")
+    unrelated.write_text("keep me", encoding="utf-8")
     with pytest.raises(FileExistsError):
         convert(str(spec_pdf), str(out_root), Options())
-    assert unrelated.read_text() == "keep me"
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
     assert not (out_root / ".agentpdf").exists()
 
     out_dir = convert(str(spec_pdf), str(out_root), Options(force=True))
     assert out_dir.is_dir()
-    assert unrelated.read_text() == "keep me"
+    assert unrelated.read_text(encoding="utf-8") == "keep me"
     assert (out_root / ".agentpdf").is_file()
 
 
@@ -268,21 +271,21 @@ def test_refuses_to_overwrite_foreign_manifest_dir(spec_pdf: Path, tmp_path: Pat
     foreign = out_root / "example-spec"
     foreign.mkdir(parents=True)
     manifest = foreign / "manifest.json"
-    manifest.write_text(json.dumps({"name": "my-web-app"}))
+    manifest.write_text(json.dumps({"name": "my-web-app"}), encoding="utf-8")
     with pytest.raises(FileExistsError):
         convert(str(spec_pdf), str(out_root), Options(force=True))
     assert manifest.is_file()
-    assert json.loads(manifest.read_text()) == {"name": "my-web-app"}
+    assert json.loads(manifest.read_text(encoding="utf-8")) == {"name": "my-web-app"}
 
 
 def test_refuses_to_overwrite_foreign_agents_md(spec_pdf: Path, tmp_path: Path) -> None:
     out_root = tmp_path / "out"
     out_root.mkdir(parents=True)
     agents_md = out_root / "AGENTS.md"
-    agents_md.write_text("# My Custom Project Agents\nDo not overwrite.")
+    agents_md.write_text("# My Custom Project Agents\nDo not overwrite.", encoding="utf-8")
     with pytest.raises(FileExistsError):
         convert(str(spec_pdf), str(out_root), Options(force=True))
-    assert agents_md.read_text() == "# My Custom Project Agents\nDo not overwrite."
+    assert agents_md.read_text(encoding="utf-8") == "# My Custom Project Agents\nDo not overwrite."
 
 
 def test_same_stem_different_pdfs_get_distinct_directories(spec_pdf: Path, tmp_path: Path) -> None:
