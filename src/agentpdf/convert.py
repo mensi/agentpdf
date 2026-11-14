@@ -9,13 +9,14 @@ from pathlib import Path
 
 import pypdf
 
-from .document import Document
+from .document import Document, validate_pdf
 from .furniture import drop_printed_toc, remove_furniture
 from .headings import detect_headings, mark_outline_headings, repair_outline_levels
+from .model import RegionKind
 from .paragraphs import Block, page_blocks, resolve_hyphens
 from .search import INDEX_FILE, build_index
 from .sections import Section, build_sections
-from .util import page_range, slugify
+from .util import page_range, parse_pages, slugify
 from .writers import (
     MANIFEST,
     MARKER,
@@ -107,6 +108,7 @@ def convert(pdf_path: str | Path, out_root: str | Path, options: Options | None 
     """
     options = options or Options()
     source, out_root = Path(pdf_path), Path(out_root)
+    validate_pdf(source)
     sha256 = _sha256(source)
     _prepare_out_root(out_root, options.force)
     final_dir = _target_dir(out_root, slugify(source.stem), sha256)
@@ -140,9 +142,18 @@ def _convert(source: Path, sha256: str, out_dir: Path, options: Options) -> None
 
         # Tables and figures become images; pages without text are rendered whole.
         for page in pages:
+            avoid = [ln.bbox for ln in page.lines]
             for region in page.regions:
                 region.image = f"images/p{page.number:04d}-{region.id}.png"
-                doc.render(page.number - 1, str(out_dir / region.image), options.dpi, region.bbox)
+                pad = 6.0 if region.kind == RegionKind.FIGURE else 4.0
+                doc.render(
+                    page.number - 1,
+                    str(out_dir / region.image),
+                    options.dpi,
+                    region.bbox,
+                    pad=pad,
+                    avoid=avoid,
+                )
             if options.page_images or not page.has_text_layer:
                 page.image = f"images/p{page.number:04d}.png"
                 doc.render(page.number - 1, str(out_dir / page.image), options.dpi)
@@ -180,7 +191,93 @@ def _convert(source: Path, sha256: str, out_dir: Path, options: Options) -> None
             json.dumps(info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         write_index(out_dir, info, sections)
-        (out_dir / "PAGES.md").write_text(pages_markdown(pages, sections), encoding="utf-8")
+        (out_dir / "PAGES.md").write_text(pages_markdown(info), encoding="utf-8")
+
+
+def render_pages(
+    target: str | Path,
+    pages_spec: str,
+    out_root: str | Path = ".",
+    *,
+    pdf_path: str | Path | None = None,
+    dpi: int = 150,
+) -> list[Path]:
+    """Render selected 1-based pages (e.g. ``10,38-42``) as full-page PNGs.
+
+    ``target`` may be the document directory name inside ``out_root``, a path
+    to a converted document directory, or a path to a PDF file. When a matching
+    converted document directory exists, ``images/pXXXX.png``, ``manifest.json``
+    and ``PAGES.md`` are updated in place.
+    """
+    target_path, root = Path(target), Path(out_root)
+    doc_dir: Path | None = None
+    source: Path | None = Path(pdf_path) if pdf_path is not None else None
+    if source is not None and not source.is_file():
+        raise FileNotFoundError(f"{source} not found")
+
+    if is_agentpdf_dir(target_path):
+        doc_dir = target_path
+    elif is_agentpdf_dir(root / target_path):
+        doc_dir = root / target_path
+    elif target_path.is_file():
+        validate_pdf(target_path)
+        source = source or target_path
+        sha = _sha256(target_path)
+        for cand in sorted(root.glob(f"*/{MANIFEST}")) if root.is_dir() else []:
+            if is_agentpdf_dir(cand.parent) and _manifest_sha256(cand.parent) == sha:
+                doc_dir = cand.parent
+                break
+    else:
+        raise FileNotFoundError(f"document {str(target)!r} not found in {root}")
+
+    if doc_dir is None:
+        assert source is not None
+        if root.is_symlink() or (root.exists() and not root.is_dir()):
+            raise FileExistsError(f"{root} exists and is not a directory")
+        root.mkdir(parents=True, exist_ok=True)
+        with Document(str(source)) as doc:
+            numbers = parse_pages(pages_spec, len(doc))
+            written = []
+            for num in numbers:
+                dest = root / f"p{num:04d}.png"
+                doc.render(num - 1, str(dest), dpi)
+                written.append(dest)
+        return written
+
+    info = json.loads((doc_dir / MANIFEST).read_text(encoding="utf-8"))
+    if source is None:
+        src_info = info.get("source", {})
+        candidates = []
+        if src_info.get("path"):
+            candidates.append(Path(src_info["path"]))
+        if src_info.get("file"):
+            candidates += [doc_dir.parent / src_info["file"], Path(src_info["file"])]
+        source = next((c for c in candidates if c.is_file()), None)
+        if source is None:
+            raise FileNotFoundError(f"source PDF {src_info.get('file', '')!r} not found; pass --pdf PATH")
+
+    images_dir = doc_dir / "images"
+    if images_dir.is_symlink() or (images_dir.exists() and not images_dir.is_dir()):
+        raise FileExistsError(f"{images_dir} exists and is not a directory")
+    if (doc_dir / "PAGES.md").is_symlink():
+        raise FileExistsError(f"{doc_dir / 'PAGES.md'} is a symlink")
+
+    with Document(str(source)) as doc:
+        numbers = parse_pages(pages_spec, len(doc))
+        images_dir.mkdir(exist_ok=True)
+        by_num = {p["page"]: p for p in info.get("pages", [])}
+        written = []
+        for num in numbers:
+            rel = f"images/p{num:04d}.png"
+            dest = doc_dir / rel
+            doc.render(num - 1, str(dest), dpi)
+            if num in by_num:
+                by_num[num]["image"] = rel
+            written.append(dest)
+
+    (doc_dir / MANIFEST).write_text(json.dumps(info, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (doc_dir / "PAGES.md").write_text(pages_markdown(info), encoding="utf-8")
+    return written
 
 
 def _split_pdf(source: Path, sections: list[Section], out_dir: Path) -> None:

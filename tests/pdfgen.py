@@ -25,6 +25,17 @@ class PageBuilder:
         self.ops.append(f"BT {font} {size} Tf {x} {y} Td ({_escape(text)}) Tj ET")
         return self
 
+    def rotated_text(self, x: float, top: float, text: str, size: float = 10) -> Self:
+        """Draw 90-degree rotated text starting at ``(x, top)`` and running upward."""
+        y = HEIGHT - top
+        self.ops.append(f"BT /F1 {size} Tf 0 1 -1 0 {x + size} {y} Tm ({_escape(text)}) Tj ET")
+        return self
+
+    def rect(self, x: float, top: float, w: float, h: float) -> Self:
+        """Draw a stroked rectangle with top-left corner at ``(x, top)``."""
+        self.ops.append(f"0.5 w {x} {HEIGHT - top - h} {w} {h} re S")
+        return self
+
     def line(self, x0: float, top0: float, x1: float, top1: float) -> Self:
         self.ops.append(f"0.5 w {x0} {HEIGHT - top0} m {x1} {HEIGHT - top1} l S")
         return self

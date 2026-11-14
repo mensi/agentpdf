@@ -72,7 +72,12 @@ def manifest(
     return {
         "format_version": FORMAT_VERSION,
         "generator": f"agentpdf {__version__}",
-        "source": {"file": source.name, "sha256": sha256, "pages": len(pages)},
+        "source": {
+            "file": source.name,
+            "path": str(source.resolve()),
+            "sha256": sha256,
+            "pages": len(pages),
+        },
         "title": metadata.get("Title") or source.stem,
         "metadata": metadata,
         "outline_source": outline_source,
@@ -189,20 +194,22 @@ def _summary(group: list[Section]) -> str:
 # PAGES.md
 
 
-def pages_markdown(pages: list[Page], sections: list[Section]) -> str:
-    by_page = _sections_by_page(sections)
+def pages_markdown(info: dict) -> str:
+    titles = {s["file"]: s["title"] for s in info["sections"] if s["file"]}
     out = ["# Pages", "", "| Page | Section | Tables and figures |", "| --- | --- | --- |"]
-    for p in pages:
-        secs = ", ".join(
-            f"[{s.display_title.replace('|', r'\|')}](sections/{s.filename})"
-            for s in by_page.get(p.number, [])
-        )
-        items = [f"[{r.kind.value} {r.index}]({r.image})" for r in p.regions]
-        if p.image:
-            items.insert(0, f"[full page]({p.image})")
-        if not p.has_text_layer:
+    for p in info["pages"]:
+        secs = ", ".join(f"[{titles[f].replace('|', r'\|')}]({f})" for f in p["sections"] if f in titles)
+        counters: dict[str, int] = {}
+        items = []
+        for r in p["regions"]:
+            kind = r["kind"]
+            counters[kind] = counters.get(kind, 0) + 1
+            items.append(f"[{kind} {counters[kind]}]({r['image']})")
+        if p.get("image"):
+            items.insert(0, f"[full page]({p['image']})")
+        if "no-text-layer" in p.get("flags", []):
             items.insert(0, "no text layer")
-        out.append(f"| {p.number} | {secs} | {', '.join(items)} |")
+        out.append(f"| {p['page']} | {secs} | {', '.join(items)} |")
     return "\n".join(out) + "\n"
 
 
@@ -226,6 +233,8 @@ whole documents: search or browse, then read only the sections you need.
   `rg -n -i "^#+ .*some title" */sections/`.
 - Section files mark pages with `<!-- page N -->`. `PAGES.md` maps pages
   to sections and images.
+- Render full pages on demand when a crop needs surrounding context:
+  `agentpdf render -d <this directory> <document> 10,38-42`.
 
 Tables and figures appear as `**[Table on page N](../images/….png)**`,
 followed by a transcription that keeps characters at their horizontal

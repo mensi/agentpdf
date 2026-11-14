@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .convert import Options, convert
+from .convert import Options, convert, render_pages
 from .search import INDEX_FILE, build_index, format_hits, search
 from .writers import write_agents_md
 
@@ -46,9 +46,20 @@ def main(argv: list[str] | None = None) -> int:
     find.add_argument("--doc", help="restrict to one document (its directory name)")
     find.add_argument("--any", action="store_true", help="match any term instead of all terms")
 
+    rend = sub.add_parser("render", help="render specific pages as full-page PNGs")
+    rend.add_argument("target", help="converted document name/directory, or path to a PDF")
+    rend.add_argument("pages", help="1-based page numbers or ranges, e.g. 10,38-42")
+    rend.add_argument(
+        "-d", "--dir", default=".", help="output directory of `convert` (default: current directory)"
+    )
+    rend.add_argument("--pdf", help="path to the source PDF if moved since conversion")
+    rend.add_argument("--dpi", type=int, default=150, help="resolution of rendered images (default: 150)")
+
     args = parser.parse_args(argv)
     if args.command == "search":
         return _search(args)
+    if args.command == "render":
+        return _render(args)
     return _convert(args)
 
 
@@ -91,6 +102,17 @@ def _search(args: argparse.Namespace) -> int:
     if relaxed:
         print("(no entry contains all terms; showing entries matching any term)")
     print(format_hits(hits))
+    return 0
+
+
+def _render(args: argparse.Namespace) -> int:
+    try:
+        paths = render_pages(args.target, args.pages, args.dir, pdf_path=args.pdf, dpi=args.dpi)
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for p in paths:
+        print(p)
     return 0
 
 

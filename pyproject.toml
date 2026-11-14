@@ -1,6 +1,6 @@
 [project]
 name = "agentpdf"
-version = "0.1.0"
+version = "0.2.0"
 description = "Convert large PDF documents into small, searchable files for AI coding agents"
 readme = "README.md"
 license = "MIT"

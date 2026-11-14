@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from agentpdf.cli import main
-from agentpdf.convert import Options, convert
+from agentpdf.convert import Options, convert, render_pages
 from agentpdf.document import Document
 from agentpdf.model import RegionKind
 
@@ -310,3 +310,188 @@ def test_same_stem_different_pdfs_get_distinct_directories(spec_pdf: Path, tmp_p
     reconverted = convert(str(p2), str(out_root), Options())
     assert reconverted == out_root / "spec-2"
     assert not (out_root / "spec-3").exists()
+
+
+def test_connected_schematic_stays_single_figure(tmp_path: Path) -> None:
+    pdf = PdfBuilder()
+    page = pdf.page()
+    page.text(72, 120, "8 Schematics", size=14, bold=True)
+    # Closed outer schematic frame (>50% page width) with internal IC grid,
+    # empty component boxes, parallel wire buses and vertical signal crossings.
+    page.rect(72, 160, 468, 220)
+    page.grid([180, 280], [200, 230, 260, 290])
+    page.text(195, 210, "U1", size=8)
+    page.text(195, 240, "VDD", size=8)
+    page.text(195, 270, "GND", size=8)
+    page.rect(350, 215, 24, 10)  # empty resistor symbol
+    for y in (215, 245, 275):
+        page.line(100, y, 480, y)
+    for x in (130, 320, 420):
+        page.line(x, 190, x, 340)
+    page.curve(430, 250, 40, 25)
+    page.text(72, 400, "Figure 8-1: Reference Schematic")
+
+    path = pdf.save(tmp_path / "schematic.pdf")
+    with Document(str(path)) as doc:
+        p = doc.page(0)
+    assert len(p.regions) == 1
+    assert p.regions[0].kind == RegionKind.FIGURE
+    assert p.regions[0].bbox[0] <= 73 and p.regions[0].bbox[2] >= 539
+    assert p.regions[0].bbox[1] <= 161 and p.regions[0].bbox[3] >= 379
+
+
+def test_horizontal_rule_table_vs_underlined_list(tmp_path: Path) -> None:
+    pdf = PdfBuilder()
+    # Page 1: genuine 3-rule booktabs table with multi-column values.
+    p1 = pdf.page()
+    for y in (180, 200, 245):
+        p1.line(72, y, 520, y)
+    p1.text(76, 185, "Parameter", size=9, bold=True)
+    p1.text(300, 185, "Typical", size=9, bold=True)
+    p1.text(430, 185, "Unit", size=9, bold=True)
+    p1.text(76, 206, "Open-loop gain", size=9)
+    p1.text(300, 206, "120", size=9)
+    p1.text(430, 206, "dB", size=9)
+    p1.text(76, 224, "Bandwidth", size=9)
+    p1.text(300, 224, "50", size=9)
+    p1.text(430, 224, "MHz", size=9)
+
+    # Page 2: single-column underlined hyperlink list of varying widths.
+    p2 = pdf.page()
+    links = [
+        (220, "Hardware Design Guidelines"),
+        (275, "Technical Reference Manual"),
+        (195, "Product Errata Sheet"),
+        (250, "Compliance Certificates"),
+    ]
+    for i, (w, label) in enumerate(links):
+        top = 180 + i * 28
+        p2.text(80, top, label, size=10)
+        p2.line(80, top + 12, 80 + w, top + 12)
+
+    path = pdf.save(tmp_path / "rules.pdf")
+    with Document(str(path)) as doc:
+        assert [r.kind for r in doc.page(0).regions] == [RegionKind.TABLE]
+        assert doc.page(1).regions == []
+
+
+def test_figure_absorbs_callouts_and_rotated_dims_not_prose(tmp_path: Path) -> None:
+    pdf = PdfBuilder()
+    page = pdf.page()
+    page.text(72, 140, "3 Pin Layout", size=14, bold=True)
+    page.text(180, 178, "continues here.", size=9)
+    # Package outline + 12 pin pads so it forms a vector figure.
+    page.rect(190, 200, 140, 120)
+    for i in range(6):
+        page.rect(190, 210 + i * 16, 10, 8)
+        page.rect(320, 210 + i * 16, 10, 8)
+    page.text(245, 255, "TOP", size=8)
+    # Perimeter pin labels (8-10 pt outside the graphic box) + 90-deg CAD dimension.
+    page.text(162, 210, "GND", size=8)
+    page.text(164, 226, "3V3", size=8)
+    page.text(339, 210, "IO14", size=8)
+    page.text(339, 226, "OUT A", size=8)
+    page.rotated_text(339, 290, "12.5", size=8)
+    # Caption and prose right below must remain body text, not figure labels.
+    page.text(190, 328, "Figure 3-1: Pinout", size=9)
+    page.text(72, 355, "Place decoupling capacitors close to the supply pins.", size=10)
+    pdf.bookmark("3 Pin Layout", 0)
+
+    out_dir = convert(str(pdf.save(tmp_path / "pinout.pdf")), str(tmp_path / "out"), Options())
+    text = _section_text(out_dir)
+    body_outside_fence = text.split("```text\n")[0] + text.split("```\n", 1)[1]
+    assert "# 3 Pin Layout" in body_outside_fence
+    assert "continues here." in body_outside_fence
+    assert "Figure 3-1: Pinout" in body_outside_fence
+    assert "Place decoupling capacitors" in body_outside_fence
+    assert "[rotated text] 12.5" in text
+    normalized = " ".join(text.split())
+    for pin in ("GND", "3V3", "IO14", "OUT A", "12.5"):
+        assert pin not in body_outside_fence
+        assert pin in normalized
+
+
+def test_render_pages_cli_and_api(spec_pdf: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    out_root = tmp_path / "out"
+    out_dir = convert(str(spec_pdf), str(out_root), Options())
+    assert not (out_dir / "images" / "p0001.png").exists()
+    assert not (out_dir / "images" / "p0003.png").exists()
+
+    assert main(["render", "-d", str(out_root), "example-spec", "1,3"]) == 0
+    out = capsys.readouterr().out
+    assert "p0001.png" in out and "p0003.png" in out
+    assert (out_dir / "images" / "p0001.png").is_file()
+    assert not (out_dir / "images" / "p0002.png").exists()
+    assert (out_dir / "images" / "p0003.png").is_file()
+
+    pages_md = (out_dir / "PAGES.md").read_text(encoding="utf-8")
+    assert "[full page](images/p0001.png)" in pages_md
+    assert "[full page](images/p0003.png), [figure 1](images/p0003-figure-1.png)" in pages_md
+
+    # Moved source PDF works with explicit --pdf; out-of-range page fails cleanly.
+    moved = tmp_path / "moved.pdf"
+    spec_pdf.rename(moved)
+    written = render_pages("example-spec", "2-3", out_root, pdf_path=moved)
+    assert [p.name for p in written] == ["p0002.png", "p0003.png"]
+    assert (out_dir / "images" / "p0002.png").is_file()
+
+    assert main(["render", "-d", str(out_root), "--pdf", str(moved), "example-spec", "99"]) == 1
+    assert "out of range" in capsys.readouterr().err
+
+
+def test_html_wrapper_and_non_pdf_rejected_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    html_pdf = tmp_path / "datasheet.pdf"
+    html_pdf.write_text("<!DOCTYPE html>\n<html><body>Sign in to download</body></html>\n", encoding="utf-8")
+    out_root = tmp_path / "out"
+
+    assert main(["convert", str(html_pdf), "-o", str(out_root)]) == 1
+    err = capsys.readouterr().err
+    assert "HTML page, not a PDF" in err
+    assert not out_root.exists()
+
+    empty_pdf = tmp_path / "empty.pdf"
+    empty_pdf.write_bytes(b"")
+    with pytest.raises(ValueError, match="empty"):
+        convert(empty_pdf, out_root, Options())
+
+    junk_pdf = tmp_path / "junk.pdf"
+    junk_pdf.write_bytes(b'{"error": "not found"}')
+    with pytest.raises(ValueError, match="not a PDF"):
+        convert(junk_pdf, out_root, Options())
+
+
+def test_inherited_mediabox_aligns_text_and_graphics(tmp_path: Path) -> None:
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import ArrayObject, FloatObject, NameObject
+
+    # Build a page with a ruled table, then move /MediaBox (A4 height 842) onto
+    # the parent /Pages node, as LaTeX/pdftex does.
+    base = PdfBuilder()
+    p = base.page()
+    p.grid([72, 220, 360], [180, 200, 220])
+    p.text(76, 185, "Pin", size=9)
+    p.text(225, 185, "Signal", size=9)
+    p.text(76, 205, "1", size=9)
+    p.text(225, 205, "GND", size=9)
+    raw_path = base.save(tmp_path / "base.pdf")
+
+    reader = PdfReader(raw_path)
+    writer = PdfWriter()
+    page = writer.add_page(reader.pages[0])
+    del page[NameObject("/MediaBox")]
+    pages_root = writer._root_object[NameObject("/Pages")].get_object()
+    pages_root[NameObject("/MediaBox")] = ArrayObject(
+        [FloatObject(0), FloatObject(0), FloatObject(595.28), FloatObject(841.89)]
+    )
+    a4_path = tmp_path / "inherited_a4.pdf"
+    with open(a4_path, "wb") as f:
+        writer.write(f)
+
+    with Document(str(a4_path)) as doc:
+        extracted = doc.page(0)
+    assert len(extracted.regions) == 1
+    assert "Pin" in extracted.regions[0].text
+    assert "GND" in extracted.regions[0].text
+    assert extracted.lines == []

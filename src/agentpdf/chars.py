@@ -37,7 +37,9 @@ Word = list[Char]
 def _display_transform(page: pdfium.PdfPage) -> Callable[[float, float, float, float], BBox]:
     """Map PDF-space boxes (left, bottom, right, top) to displayed page
     coordinates (top-left origin, after /Rotate)."""
-    mx0, my0, mx1, my1 = page.get_mediabox()
+    # get_bbox() walks the /Pages tree for inherited /MediaBox and /CropBox,
+    # whereas get_mediabox() falls back to US Letter when /MediaBox is inherited.
+    mx0, my0, mx1, my1 = page.get_bbox()
     width, height = mx1 - mx0, my1 - my0
     rotation = page.get_rotation() % 360
 

@@ -7,7 +7,7 @@ try:
 except PackageNotFoundError:
     __version__ = "0.1.0"
 
-from .convert import Options, convert
+from .convert import Options, convert, render_pages
 from .search import Hit, build_index, search
 
-__all__ = ["Hit", "Options", "__version__", "build_index", "convert", "search"]
+__all__ = ["Hit", "Options", "__version__", "build_index", "convert", "render_pages", "search"]

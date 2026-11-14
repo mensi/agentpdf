@@ -84,11 +84,13 @@ agentpdf convert PDF... -o DIR [--max-tokens 6000] [--dpi 150]
                                [--page-images] [--split-pdf] [--no-index]
                                [--force]
 agentpdf search QUERY [-d DIR] [-n 10] [--doc NAME] [--any]
+agentpdf render TARGET PAGES [-d DIR] [--pdf PDF] [--dpi 150]
 ```
 
-`--page-images` also renders every page, `--split-pdf` writes one PDF per
-section, `--force` writes into an existing non-empty output directory.
-Converting again replaces a document's output.
+`render` renders selected 1-based pages (e.g. `10,38-42`) as full-page PNGs on
+demand and updates `PAGES.md`; `--page-images` renders every page upfront,
+`--split-pdf` writes one PDF per section, `--force` writes into an existing
+non-empty output directory. Converting again replaces a document's output.
 
 ## Development
 

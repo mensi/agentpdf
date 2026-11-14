@@ -2,6 +2,7 @@
 
 import heapq
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Self
 
 import pdfplumber
@@ -12,11 +13,26 @@ from .model import BBox, Line, OutlineEntry, Page, Region, RegionKind
 from .regions import PlacedRegion, locate_regions
 
 
+def validate_pdf(path: str | Path) -> None:
+    """Raise ``ValueError`` if ``path`` does not begin with a PDF header."""
+    with open(path, "rb") as f:
+        head = f.read(1024)
+    if b"%PDF-" in head:
+        return
+    if not head:
+        raise ValueError("empty file, not a PDF")
+    sample = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if b"<!doctype html" in sample or b"<html" in sample:
+        raise ValueError("file is an HTML page, not a PDF (follow the direct .pdf download link)")
+    raise ValueError("not a PDF file (missing %PDF- header)")
+
+
 class Document:
     """An open PDF, read with PDFium (text, rendering) and pdfplumber
     (graphics for region detection)."""
 
     def __init__(self, path: str):
+        validate_pdf(path)
         self.path = path
         self.pdfium = pdfium.PdfDocument(path)
         try:
@@ -81,25 +97,52 @@ class Document:
             plumber_page.close()
             pdf_page.close()
 
-    def render(self, index: int, path: str, dpi: int, bbox: BBox | None = None) -> None:
+    def render(
+        self,
+        index: int,
+        path: str,
+        dpi: int,
+        bbox: BBox | None = None,
+        *,
+        pad: float = 4.0,
+        avoid: list[BBox] | None = None,
+    ) -> None:
         """Render a page, or a region of it, to PNG."""
         pdf_page = self.pdfium[index]
         try:
             crop = (0.0, 0.0, 0.0, 0.0)
             if bbox is not None:
                 width, height = pdf_page.get_size()
-                pad = 4.0
-                x0, top, x1, bottom = bbox
+                px0, ptop, px1, pbottom = _padded_bbox(bbox, width, height, pad, avoid or [])
                 crop = (
-                    max(0.0, x0 - pad),
-                    max(0.0, height - bottom - pad),
-                    max(0.0, width - x1 - pad),
-                    max(0.0, top - pad),
+                    max(0.0, px0),
+                    max(0.0, height - pbottom),
+                    max(0.0, width - px1),
+                    max(0.0, ptop),
                 )
             image = pdf_page.render(scale=dpi / 72, crop=crop).to_pil()
         finally:
             pdf_page.close()
         image.save(path, optimize=True)
+
+
+def _padded_bbox(bbox: BBox, width: float, height: float, pad: float, avoid: list[BBox]) -> BBox:
+    """Expand ``bbox`` by ``pad`` without encroaching on neighboring text lines."""
+    x0, top, x1, bottom = bbox
+    px0, ptop = max(0.0, x0 - pad), max(0.0, top - pad)
+    px1, pbottom = min(width, x1 + pad), min(height, bottom + pad)
+    for nb in avoid:
+        if min(px1, nb[2]) > max(px0, nb[0]):
+            if ptop < nb[3] <= top:
+                ptop = max(ptop, (nb[3] + top) / 2)
+            elif bottom <= nb[1] < pbottom:
+                pbottom = min(pbottom, (bottom + nb[1]) / 2)
+        if min(pbottom, nb[3]) > max(ptop, nb[1]):
+            if px0 < nb[2] <= x0:
+                px0 = max(px0, (nb[2] + x0) / 2)
+            elif x1 <= nb[0] < px1:
+                px1 = min(px1, (x1 + nb[0]) / 2)
+    return (px0, ptop, px1, pbottom)
 
 
 def _split_text(chars: list[Char], placed: list[PlacedRegion]) -> tuple[list[Line], list[Region]]:

@@ -39,4 +39,9 @@ Each hit gives `file:line (page) — heading` relative to the output directory;
 read that section file (or the lines around the hit). Browse
 `<output>/<document>/INDEX.md` for the table of contents.
 Tables and figures are linked PNG crops with a text transcription; view the
-image when exact values matter.
+image when exact values matter. If a complex diagram or schematic needs
+surrounding page context, render just those pages on demand:
+
+```sh
+uvx agentpdf render -d docs/reference <document> 10,38-42
+```
